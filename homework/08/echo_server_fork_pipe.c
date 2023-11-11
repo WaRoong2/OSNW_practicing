@@ -85,11 +85,14 @@ int main(int argc, char **argv)
 		}
 		else if( pid > 0 )
 		{
-			memset(buf, 0x00, MAXLINE);
-			read(fd[0], buf, MAXLINE);
-			ptr = strcat(total_buf, buf);
 			if ( client_num==MAXCLIENT )
 			{
+				for (int j=0 ; j<client_num ; j++)
+				{	
+					memset(buf, 0x00, MAXLINE);
+					read(fd[0], buf, MAXLINE);
+					ptr = strcat(total_buf, buf);
+				}
 				while ( client_num > 0 )
 				{
 					write(client_fd[--client_num], total_buf, strlen(total_buf));
