@@ -10,7 +10,6 @@
 
 #define MAXLINE 1024
 #define MAXCLIENT 3 //
-#define MAXINPUTTIMES 32 //
 #define PORTNUM 3600
 
 int main(int argc, char **argv)
