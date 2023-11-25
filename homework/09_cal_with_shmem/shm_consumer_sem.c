@@ -53,7 +53,6 @@ int main(int argc, char **argv)
 
 	while(1)
 	{
-		int local_var=0;
 		if(semop(semid, &semopen, 1) == -1)
 		{
 			perror("semop error : ");
