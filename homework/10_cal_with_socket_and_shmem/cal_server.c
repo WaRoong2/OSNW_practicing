@@ -14,6 +14,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 
 #define PORT 3600
 
@@ -27,11 +28,6 @@ typedef struct _cal_data
 	short int error;
 } cal_data;
 
-union semun
-{
-        int val;
-};
-
 int main(int argc, char **argv)
 {
     	time_t rawtime;
@@ -40,7 +36,8 @@ int main(int argc, char **argv)
 	struct sockaddr_in client_addr, sock_addr;
         int listen_sockfd, client_sockfd;
         int addr_len;
- 	pid_t pid;
+	int shm_key=0x1000;
+ 	pid_t pid1;
 
         if( (listen_sockfd  = socket(AF_INET, SOCK_STREAM, 0)) == -1 )
         {
@@ -72,70 +69,63 @@ int main(int argc, char **argv)
                         perror("Error ");
                         return 1;
                 }
-		pid = fork();
-		if (pid == 0)
+		pid1 = fork();
+		shm_key++;
+		if (pid1 == 0)
 		{
-			printf("New Client Connect : %s\n", inet_ntoa(client_addr.sin_addr));
+			printf("New Client Connected : %s\n", inet_ntoa(client_addr.sin_addr));
 			int shmid;
         		int semid;
-			void *shared_memory = NULL;
+			pid_t pid2;
+
 			struct sembuf semopen = {0, -1, SEM_UNDO};
         		struct sembuf semclose = {0, 1, SEM_UNDO};
-			
-			int end_connection = 0;
-			
-			pid = fork();
-			if (pid == 0) //producer
+				
+			pid2 = fork();
+			if (pid2 == 0) //producer
 			{
-        			int left_num, right_num, cal_result;
+				int left_num, right_num, cal_result;
+				cal_data rdata;
 				cal_data* sh_cal_data;
 				short int cal_error;
 				char string_input[32];
 
-				union semun sem_union;
+				void *shared_memory = NULL;
 				
-				shmid = shmget((key_t)1234, sizeof(cal_data), 0666|IPC_CREAT);
+				shmid = shmget((key_t)shm_key, sizeof(cal_data), 0666|IPC_CREAT);
 	      			if (shmid == -1)
         			{
                 			return 1;
-        			}
-
-        			semid = semget((key_t)3477, 1, IPC_CREAT|0666);
-        			if(semid == -1)
-        			{
-                			return 1;
-        			}
+        			}	
 
         			shared_memory = shmat(shmid, NULL, 0);
         			if (shared_memory == (void *)-1)
         			{
                 			return 1;
         			}
-				
-				sem_union.val = 1;
-				if ( -1 == semctl( semid, 0, SETVAL, sem_union))
-                                {
-                                        return 1;
-                                }
+					
 
 				sh_cal_data = (cal_data *)shared_memory;
+				memset(sh_cal_data, 0x00, sizeof(cal_data));
+
 				while(1)
 				{
-					memset(sh_cal_data, 0x00, sizeof(*sh_cal_data));
-                			read(client_sockfd, sh_cal_data, sizeof(*sh_cal_data));
-					if (strcmp(sh_cal_data->string_input, "quit\n")==0)
-					{
-						break;
-					}
-					
+					memset(&rdata, 0x00, sizeof(cal_data));
+                			read(client_sockfd, &rdata, sizeof(cal_data));
+						
 	        	        	cal_result = 0;
         		        	cal_error = 0;
 	
-                			left_num = ntohl(sh_cal_data->left_num);
-		                	right_num = ntohl(sh_cal_data->right_num);
-					printf("\n%d %d %c %s\n", left_num, right_num, sh_cal_data->op, sh_cal_data->string_input);
+                			left_num = ntohl(rdata.left_num);
+		                	right_num = ntohl(rdata.right_num);
+				printf("%d %d %c %s\n", left_num, right_num, rdata.op, rdata.string_input);
+					if (strcmp(rdata.string_input, "quit")==0)
+					{
+						strcpy(sh_cal_data->string_input, "quit");
+						return 1;
+					}
 
-					switch(sh_cal_data->op)
+					switch(rdata.op)
 	                		{
 	                        		case '+':
                                 			cal_result = left_num + right_num;
@@ -158,34 +148,26 @@ int main(int argc, char **argv)
 	        	                        	cal_error = 1;
 
                 			}
-					if(semop(semid, &semopen, 1) == -1)
-			                {
-			                        perror("semop error : ");
-			                }
-                			sh_cal_data->result = cal_result;
-        	        		sh_cal_data->error = cal_error;
-					semop(semid, &semclose, 1);
-
+					sh_cal_data->left_num = htonl(left_num);
+					sh_cal_data->right_num = htonl(right_num);
+					sh_cal_data->op = rdata.op;
+                			sh_cal_data->result = htonl(cal_result);
+        	        		sh_cal_data->error = htonl(cal_error);
+						
 				}
-				return 1;
+        			
 			}
-			else if ( pid > 0 ) //consumer
+			else if ( pid2 > 0 ) //consumer
 			{
+				void *shared_memory = NULL;
 				cal_data* sh_cal_data;
-				
-				shmid = shmget((key_t)1234, 24, 0666);
+				usleep(10);
+				shmid = shmget((key_t)shm_key, sizeof(cal_data), 0666);
 	        		if (shmid == -1)
 	        		{
  			         	perror("shmget failed : ");
                 			exit(0);
 				}
-
-			        semid = semget((key_t)3477, 0, 0666);
-			        if(semid == -1)
-			        {
-			                perror("semget failed : ");
-			                return 1;
-			        }
 
 			        shared_memory = shmat(shmid, NULL, 0);
 			        if (shared_memory == (void *)-1)
@@ -197,30 +179,23 @@ int main(int argc, char **argv)
 			        sh_cal_data = (cal_data *)shared_memory;
         	        	while(1)
 			        {
-					if (strcmp(sh_cal_data->string_input, "quit\n")==0)
+					if (strcmp(sh_cal_data->string_input, "quit")==0)
 					{
-						break;
+						write(client_sockfd, sh_cal_data, sizeof(cal_data));
+						memset(sh_cal_data, 0x00, sizeof(cal_data));	
+						return 2;
 					}
-					if(semop(semid, &semopen, 1) == -1)
-			                {
-			                        perror("semop error : ");
-			                }
-					sh_cal_data->result = htonl(sh_cal_data->result);
-					sh_cal_data->error = htonl(sh_cal_data->error);
-
 					time(&rawtime);
 					timeinfo = localtime(&rawtime);
-					strftime(sh_cal_data->string_input, sizeof(sh_cal_data->string_input), "%a %b %d %H:%M:%S %Y", timeinfo);
-                			
-					write(client_sockfd, sh_cal_data, sizeof(*sh_cal_data));
-					semop(semid, &semclose, 1);
+					strftime(sh_cal_data->string_input, sizeof(sh_cal_data->string_input),
+						       	"%a %b %d %H:%M:%S %Y", timeinfo);
+					write(client_sockfd, sh_cal_data, sizeof(cal_data));
 					
-					sleep(10);
+					sleep(7);
 		        	}
-				return 2;
 			}
 		}
-		else if( pid > 0 )
+		else if( pid1 > 0 )
 			close(client_sockfd);
         }
        	close(listen_sockfd);
