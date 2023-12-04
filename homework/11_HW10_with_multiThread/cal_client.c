@@ -22,13 +22,15 @@ typedef struct _cal_data
     short int error;
 } cal_data;
 
+void *worker1(void *data);
+
 int main(int argc, char **argv)
 {
 	struct sockaddr_in addr;
 	int s;
 	int len;
 	int sbyte, rbyte;
-	cal_data sdata;
+	cal_data* sdata;
 	pid_t pid;
 	
 	memset((void *)&sdata, 0x00, sizeof(sdata));
@@ -50,50 +52,49 @@ int main(int argc, char **argv)
 	   	return 1;
 	}
 	
-	pid = fork();
-	if (pid==0)   // child = user input and send to server
+	pthread_t thread_id;
+	pthread_create(&thread_id, NULL, worker1, (void *)sdata);
+	while(1)
 	{
-		while(1)
-	    	{
-			scanf("%d %d %c %s", &sdata.left_num, &sdata.right_num, &sdata.op, sdata.string_input);
-	    		if (strcmp(sdata.string_input, "quit\n")==0)
-				break;
-		    	len = sizeof(sdata);
-			sdata.left_num = htonl(sdata.left_num);
-		    	sdata.right_num = htonl(sdata.right_num);
-		    	sbyte = write(s, &sdata, len);
-		    	if(sbyte != len)
-		    	{
-				return 1;
-			}
-			
-    		}
-    	}
-	else if ( pid > 0 ) // parent = print data from server
-	{
-		while(1)
+		len = sizeof(cal_data);
+		rbyte = read(s, sdata, len);
+		if(rbyte != len)
 		{
-			len = sizeof(cal_data);
-			rbyte = read(s, &sdata, len);
-			if(rbyte != len)
-			{
-				return 1;
-	    		}
-			if ( strcmp(sdata.string_input, "quit")==0 )
-			{
-				return 2;
+			return 1;
 			}
-			if (ntohs(sdata.error != 0))
-    			{
-	   			printf("CALC Error %d\n", ntohs(sdata.error));
-	    		}
-			else if (sdata.op != 0)
-			{
-				printf("%d %d %c %d %s\n", ntohl(sdata.left_num), ntohl(sdata.right_num), sdata.op, ntohl(sdata.result), sdata.string_input); 
-			}
-			sleep(7);
+		if ( strcmp(sdata->string_input, "quit")==0 )
+		{
+			return 2;
 		}
+		if (ntohs(sdata->error != 0))
+			{
+			printf("CALC Error %d\n", ntohs(sdata->error));
+			}
+		else if (sdata->op != 0)
+		{
+			printf("%d %d %c %d %s\n", ntohl(sdata->left_num), ntohl(sdata->right_num), sdata->op, ntohl(sdata->result), sdata->string_input); 
+		}
+		sleep(7);
 	}
 	close(s);
 	return 0;
+}
+
+void *worker1(void *data)
+{
+	cal_data sdata = (cal_data*) data;
+	while(1)
+	{
+		scanf("%d %d %c %s", &sdata->left_num, &sdata->right_num, &sdata->op, sdata->string_input);
+		if (strcmp(sdata->string_input, "quit\n")==0)
+			break;
+		len = sizeof(sdata);
+		sdata->left_num = htonl(sdata->left_num);
+		sdata->right_num = htonl(sdata->right_num);
+		sbyte = write(s, sdata, len);
+		if(sbyte != len)
+		{
+			return 1;
+		}
+	}
 }
